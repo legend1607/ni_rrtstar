@@ -17,8 +17,8 @@ class PNGWrapper:
         - inputs:
             - num_classes: default 2, for path and not path.
         """
-        self.model = get_model(num_classes).to(device)
-        model_filepath = join(root_dir, 'results/model_training/pointnet2_2d/checkpoints/best_pointnet2_2d.pth')
+        self.model = get_model(num_classes,coord_dim=2).to(device)
+        model_filepath = join(root_dir, 'results/model_training/random_pointnet2_2d/checkpoints/best_random_pointnet2_2d.pth')
         checkpoint = torch.load(model_filepath, map_location=torch.device(device))
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model = self.model.eval()
@@ -43,11 +43,6 @@ class PNGWrapper:
         with torch.no_grad():
             # assume type is np.float32
             n_points = pc.shape[0]
-            if pc.shape[1]==2:
-                pc = np.concatenate(
-                    (pc, np.zeros((n_points, 1)).astype(np.float32)),
-                    axis=1,
-                )
             pc_xyz = torch.from_numpy(pc_normalize(pc)).to(self.device) # (n_points, 3)
             free_mask = 1-(start_mask+goal_mask).astype(bool) # (n_points,)
             pc_features = torch.from_numpy(np.stack(

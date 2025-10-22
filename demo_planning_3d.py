@@ -8,7 +8,7 @@ from importlib import import_module
 class Args:
     # Path planner options: rrt_star, irrt_star, nrrt_star, nirrt_star
     path_planner = 'nirrt_star'
-    # Neural net: none, pointnet2, unet, pointnet
+    # Neural net: none, pointnet2, unet, pointnet, pointnet2tf
     neural_net = 'pointnet2'
     # Connection strategy: none, bfs, astar
     connect = 'none'
@@ -18,7 +18,7 @@ class Args:
     step_len = 10
     iter_max = 500
     clearance = 2
-    pc_n_points = 2048
+    pc_n_points = 4096
     pc_over_sample_scale = 5
     pc_sample_rate = 0.5
     pc_update_cost_ratio = 1.0
@@ -29,6 +29,8 @@ class Args:
     result_folderpath = 'results'
     path_len_threshold_percentage = 0.02
     iter_after_initial = 1000
+    env_config_index = 3  # 比如设为 3 就固定选第 3 个环境
+    use_dir_head = False  # 新增参数
 
 args = Args()
 
@@ -47,6 +49,8 @@ if args.neural_net == 'none':
     path_planner_name = args.path_planner
 elif args.neural_net in ['pointnet2', 'pointnet']:
     path_planner_name = args.path_planner + '_png'
+elif args.neural_net == 'pointnet2tf':
+    path_planner_name = args.path_planner + '_png_tf'
 elif args.neural_net == 'unet':
     path_planner_name = args.path_planner + '_gng'
 else:
@@ -60,13 +64,13 @@ get_path_planner = getattr(
     import_module('path_planning_classes_3d.' + path_planner_name),
     'get_path_planner'
 )
-
+print(f"Using path planner: {get_path_planner}")
 # ================================
 # set NeuralWrapper
 # ================================
 if args.neural_net in ['none']:
     NeuralWrapper = None
-elif args.neural_net in ['pointnet2', 'pointnet']:
+elif args.neural_net in ['pointnet2', 'pointnet', 'pointnet2tf']:
     neural_wrapper_name = args.neural_net + '_wrapper'
     if args.connect != 'none':
         neural_wrapper_name += '_connect_' + args.connect
@@ -76,7 +80,7 @@ elif args.neural_net in ['pointnet2', 'pointnet']:
     )
 else:
     raise NotImplementedError
-
+print(f"Using neural wrapper: {NeuralWrapper}")
 # ================================
 # set planning problem
 # ================================
@@ -100,7 +104,10 @@ def main():
         neural_wrapper = None
     else:
         if args.problem.startswith('random'):
-            neural_wrapper = NeuralWrapper(device=args.device)
+            if args.neural_net == 'pointnet2tf':
+                neural_wrapper = NeuralWrapper(use_dir_head=args.use_dir_head, device=args.device)
+            else:
+                neural_wrapper = NeuralWrapper(device=args.device)
         elif args.problem.startswith('kuka'):
             neural_wrapper = NeuralWrapper(coord_dim=7, device=args.device)
 
@@ -113,8 +120,12 @@ def main():
 
     # Load environment configurations
     env_config_list = get_env_configs()
-    env_config_index = np.random.randint(len(env_config_list))
-    print("Selected env_config_index:", env_config_index)
+    if args.env_config_index is None:
+        env_config_index = np.random.randint(len(env_config_list))
+        print("Randomly selected env_config_index:", env_config_index)
+    else:
+        env_config_index = args.env_config_index
+        print("Using fixed env_config_index:", env_config_index)
     env_config = env_config_list[env_config_index]
 
     # Get problem input

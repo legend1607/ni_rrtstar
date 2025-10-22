@@ -16,21 +16,28 @@ class Utils:
         self.x_range = self.env.x_range
         self.y_range = self.env.y_range
 
-    def is_collision(self, start, end):
+    def is_collision(self, start, end, step=1.0):
         """
-        - inputs:
-            - start: np or tuple (2,)
-            - end: np or tuple (2,)
-        - outputs:
-            - collision: bool.
+        更稳健的碰撞检测：对长线段分段采样，逐段调用 check_collision_line_circles_rectangles
+        - step: 每段长度，越小越精细，越安全
         """
-        line = np.array([start, end]).astype(np.float64)
-        return check_collision_line_circles_rectangles(
-            line,
-            self.obs_circle,
-            self.obs_rectangle,
-            self.clearance,
-        )
+        start = np.array(start, dtype=np.float64)
+        end = np.array(end, dtype=np.float64)
+        dist = np.linalg.norm(end - start)
+
+        n_steps = max(1, int(dist / step))  # 至少 1 段
+        for i in range(n_steps):
+            p1 = start + (i / n_steps) * (end - start)
+            p2 = start + ((i + 1) / n_steps) * (end - start)
+            line = np.array([p1, p2])
+            if check_collision_line_circles_rectangles(
+                line,
+                self.obs_circle,
+                self.obs_rectangle,
+                self.clearance
+            ):
+                return True
+        return False
 
     def is_inside_obs(self, node):
         """

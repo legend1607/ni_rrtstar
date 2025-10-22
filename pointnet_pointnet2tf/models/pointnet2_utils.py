@@ -10,13 +10,26 @@ def timeit(tag, t):
     print("{}: {}s".format(tag, time() - t))
     return time()
 
-def pc_normalize(pc):
-    centroid = np.mean(pc, axis=0)
-    pc = pc - centroid
-    m = np.max(np.sqrt(np.sum(pc**2, axis=1)))
-    pc = pc / m
-    return pc
+def pc_normalize(pc, return_stats=False):
+    """
+    Normalize point cloud to unit sphere.
 
+    Args:
+        pc (np.ndarray): (N, d)
+        return_stats (bool): whether to also return centroid and scale
+    Returns:
+        pc_norm (np.ndarray): normalized point cloud
+        (optional) centroid, scale
+    """
+    centroid = np.mean(pc, axis=0)
+    pc_centered = pc - centroid
+    scale = np.max(np.sqrt(np.sum(pc_centered**2, axis=1)))
+    pc_norm = pc_centered / scale
+
+    if return_stats:
+        return pc_norm, centroid, scale
+    else:
+        return pc_norm
 
 def square_distance(src, dst):
     """
@@ -91,8 +104,8 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     Input:
         radius: local region radius
         nsample: max sample number in local region
-        xyz: all points, [B, N, 3]
-        new_xyz: query points, [B, S, 3]
+        xyz: all points, [B, N, C]
+        new_xyz: query points, [B, S, C]
     Return:
         group_idx: grouped points index, [B, S, nsample]
     """
@@ -139,6 +152,7 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
     else:
         return new_xyz, new_points
 
+
 def sample_and_group_all(xyz, points):
     """
     Input:
@@ -149,7 +163,6 @@ def sample_and_group_all(xyz, points):
         new_points: sampled points data, [B, 1, N, 3+D]
     """
     device = xyz.device
-    print("xyz.shape=", xyz.shape)
     B, N, C = xyz.shape
     new_xyz = torch.zeros(B, 1, C).to(device)
     grouped_xyz = xyz.view(B, 1, N, C)

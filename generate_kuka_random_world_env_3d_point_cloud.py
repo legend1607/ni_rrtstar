@@ -1,3 +1,4 @@
+# generate_kuka_random_world_env_3d_point_cloud.py
 import glob
 import json
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED

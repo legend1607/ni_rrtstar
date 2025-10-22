@@ -1,3 +1,4 @@
+#train_pointnet_pointnet2.py
 import os
 import logging
 import argparse
@@ -29,7 +30,7 @@ def bn_momentum_adjust(m, momentum):
 def parse_args():
 
     parser = argparse.ArgumentParser('Model')
-    parser.add_argument('--dim', type=int, default=3, help='environment dimension: 2 or 3.')
+    parser.add_argument('--dim', type=int, default=2, help='environment dimension: 2 or 3.')
     parser.add_argument('--env', type=str, default='random', choices=['random', 'kuka_random'])
     parser.add_argument('--model', type=str, default='pointnet2', help='pointnet2tf support no direction head', choices=['pointnet2', 'pointnet2tf'])
     parser.add_argument('--batch_size', type=int, default=16)

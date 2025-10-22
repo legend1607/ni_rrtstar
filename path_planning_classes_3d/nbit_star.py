@@ -28,8 +28,8 @@ def set_random_seed(seed):
     torch.manual_seed(seed)
     random.seed(seed)
 
-class BITStar:
-    def __init__(self, environment, plot_flag=False, batch_size=200, T=10000, sampling=None, timer=None):
+class NBITStar:
+    def __init__(self, environment, plot_flag=False, batch_size=200, T=10000, sampling=None, timer=None, neural_wrapper=None):
         if timer is None:
             self.timer = Timer()
         else:
@@ -447,7 +447,7 @@ def get_path_planner(args, problem, neural_wrapper):
     binary_mask = problem['binary_mask']
     start = problem['x_start']
     goal = problem['x_goal']
-
+    neural_wrapper = neural_wrapper  
     # 创建 BIT* 环境
     environment = SimpleEnv(binary_mask, start, goal)
 
@@ -458,12 +458,13 @@ def get_path_planner(args, problem, neural_wrapper):
     # 是否可视化规划过程
     plot_flag = True if getattr(args, "visualize", False) else False
 
-    # 创建 BIT* 实例
-    planner = BITStar(
+    # 创建 NBIT* 实例
+    planner = NBITStar(
         environment=environment,
         plot_flag=plot_flag,
         batch_size=batch_size,
-        T=T_max
+        T=T_max,
+        neural_wrapper=neural_wrapper
     )
 
     return planner

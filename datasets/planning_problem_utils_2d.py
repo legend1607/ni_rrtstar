@@ -46,6 +46,25 @@ def get_random_2d_env_configs(root_dir='.'):
             env_config_list.append(env_config)
     return env_config_list
 
+def get_random_2d_simple_env_configs(root_dir='.'):
+    '''
+    The random 2d world dataset has 4 pairs of start and goal for each obstacle map.
+    We transform one obstacle map into 4 environments for evaluation.
+    '''
+    with open(join("data", "random_2d_simple", "test", "envs.json"), 'r') as f:
+        random_2d_map_list = json.load(f)
+    env_config_list = []
+    for map_idx, env_dict_per_map in enumerate(random_2d_map_list):
+        for start_goal_pair_idx in range(len(env_dict_per_map['start'])):
+            env_config = {}
+            env_config['img_idx'] = map_idx
+            env_config['start_goal_idx'] = start_goal_pair_idx
+            env_config['env_dict'] = copy(env_dict_per_map)
+            env_config['env_dict']['start'] = [env_dict_per_map['start'][start_goal_pair_idx]]
+            env_config['env_dict']['goal'] = [env_dict_per_map['goal'][start_goal_pair_idx]]
+            env_config_list.append(env_config)
+    return env_config_list
+
 def get_block_problem_input(block_env_config):
     w, d_goal, img_height, img_width, best_path_len = \
         block_env_config['w'], \
@@ -147,6 +166,25 @@ def get_random_2d_problem_input(random_2d_env_config):
     The last None is to match outputs of other get_problem_input functions.
     '''
     env_img = cv2.imread(join("data", "random_2d", "test", "env_imgs", "{0}.png".format(random_2d_env_config['img_idx'])))
+    binary_mask = get_binary_mask(env_img)
+    env_dict = random_2d_env_config['env_dict']
+    x_start = tuple(env_dict['start'][0])
+    x_goal = tuple(env_dict['goal'][0])
+
+    problem = {}
+    problem['x_start'] = x_start
+    problem['x_goal'] = x_goal
+    problem['env_dict'] = env_dict
+    problem['env'] = Env(env_dict)
+    problem['binary_mask'] = binary_mask
+    problem['search_radius'] = compute_gamma_rrt_star(binary_mask, dim=2)
+    return problem
+
+def get_random_2d_simple_problem_input(random_2d_env_config):
+    '''
+    The last None is to match outputs of other get_problem_input functions.
+    '''
+    env_img = cv2.imread(join("data", "random_2d_simple", "test", "env_imgs", "{0}.png".format(random_2d_env_config['img_idx'])))
     binary_mask = get_binary_mask(env_img)
     env_dict = random_2d_env_config['env_dict']
     x_start = tuple(env_dict['start'][0])

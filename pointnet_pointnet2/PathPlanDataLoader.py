@@ -1,7 +1,7 @@
 import numpy as np
 from torch.utils.data import Dataset
 
-from pointnet_pointnet2.models.pointnet2_utils import pc_normalize
+from pointnet_pointnet2tf.models.pointnet2_utils import pc_normalize
 
 
 class PathPlanDataset(Dataset):
@@ -24,11 +24,6 @@ class PathPlanDataset(Dataset):
             self.path_mask = data['bitstar'].astype(np.float32)
         self.token = data['token']
         # print(f"self.token.dtype: {self.token.dtype}")
-        if self.pc.shape[2]==2:
-            self.pc = np.concatenate(
-                (self.pc, np.zeros((self.pc.shape[0], self.pc.shape[1], 1)).astype(np.float32)),
-                axis=2,
-            )
         self.d = self.pc.shape[2]
         self.n_points = self.pc.shape[1]  
         print(f"[PathPlanDataset] Loaded point cloud with dimension = {self.d}")

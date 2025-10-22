@@ -1,4 +1,6 @@
+import os
 import time
+from matplotlib import pyplot as plt
 import numpy as np
 
 from path_planning_utils_3d.rrt_env_3d import Env
@@ -11,7 +13,7 @@ from datasets_3d.point_cloud_mask_utils_3d import generate_rectangle_point_cloud
 
 
 
-class NIRRTStarPNG3D(IRRTStar3D):
+class NIRRTStarPNGtf3D(IRRTStar3D):
     def __init__(
         self,
         x_start,
@@ -61,6 +63,10 @@ class NIRRTStarPNG3D(IRRTStar3D):
         self.init_pc()
         c_best = np.inf
         c_update = c_best
+        c_list = []                 # 每次迭代的路径代价
+        t_list = []                 # 每次迭代对应的累计时间
+        first_solution_time = None  # 第一次可行解时间
+        t_start = time.time()       # 总规划开始时间
 
         for k in range(self.iter_max):
             start_time = time.time()  # 记录每次迭代开始时间
@@ -95,9 +101,16 @@ class NIRRTStarPNG3D(IRRTStar3D):
             if len(self.path_solutions) > 0:
                 c_best, x_best = self.find_best_path_solution()
                 self.path = self.extract_path(x_best)
+                # 记录第一次找到解的时间
+                if first_solution_time is None:
+                    first_solution_time = time.time() - t_start
+                    print(f"First feasible solution found at iteration {k}, time: {first_solution_time:.4f} s")
             else:
                 self.path = []
 
+            # 记录路径代价
+            c_list.append(c_best)
+            t_list.append(time.time() - t_start)
             end_time = time.time()
             planning_time = end_time - start_time
 
@@ -105,9 +118,50 @@ class NIRRTStarPNG3D(IRRTStar3D):
             if k % 50 == 0:
                 print(f"Iteration {k} finished in {planning_time:.4f} s, current best path length: {c_best}")
                 if visualize:
-                    img_filename = f"nirrt_3d/iter_{k}.png"
+                    planner_name = self.__class__.__name__   # e.g. "NIRRTStarPNG3D"
+                    img_dir = os.path.join("visualization", "planning_demo", planner_name)
+                    os.makedirs(img_dir, exist_ok=True)
+                    img_filename = os.path.join(img_dir, f"iter_{k}.png")
                     self.visualize(x_center, c_best, start_goal_straightline_dist, C, img_filename=img_filename)
 
+        total_time = time.time() - t_start
+        print(f"Planning finished. First solution time: {first_solution_time}, Total planning time: {total_time:.4f} s")
+        
+        def plot_convergence(iter_list, time_list, cost_list, save_dir):
+            # 图1: 迭代 vs 路径代价
+            plt.figure(figsize=(8, 5))
+            plt.plot(iter_list, cost_list, label="Path cost vs Iteration", linewidth=2)
+            plt.xlabel("Iteration")
+            plt.ylabel("Path cost")
+            plt.title("Convergence (Iteration vs Path cost)")
+            plt.legend()
+            plt.grid(True, linestyle="--", alpha=0.7)
+            save_path1 = os.path.join(save_dir, "convergence_iteration.png")
+            plt.savefig(save_path1, dpi=300)
+            plt.close()
+            print(f"Convergence (iteration) plot saved to {save_path1}")
+
+            # 图2: 时间 vs 路径代价
+            plt.figure(figsize=(8, 5))
+            plt.plot(time_list, cost_list, label="Path cost vs Time", linewidth=2)
+            plt.xlabel("Planning time (s)")
+            plt.ylabel("Path cost")
+            plt.title("Convergence (Time vs Path cost)")
+            plt.legend()
+            plt.grid(True, linestyle="--", alpha=0.7)
+            save_path2 = os.path.join(save_dir, "convergence_time.png")
+            plt.savefig(save_path2, dpi=300)
+            plt.close()
+            print(f"Convergence (time) plot saved to {save_path2}")
+
+        # 保存到当前规划器目录
+        planner_name = self.__class__.__name__   # e.g. "NIRRTStarPNG3D"
+        img_dir = os.path.join("visualization", "planning_demo", planner_name)
+        os.makedirs(img_dir, exist_ok=True)
+
+        iter_list = list(range(1, len(c_list) + 1))
+        plot_convergence(iter_list, t_list, c_list, img_dir)
+        
     def generate_random_node(
         self,
         c_curr,
@@ -137,14 +191,16 @@ class NIRRTStarPNG3D(IRRTStar3D):
                 ), c_update
             else:
                 return self.SampleFree(), c_update
-
+            
     def SamplePointCloud(self):
         idx = np.random.randint(0, len(self.path_point_cloud_pred))
         point = self.path_point_cloud_pred[idx]
-        direction = self.path_point_cloud_dir[idx]
-        # 你可以用 direction 做小偏移，沿方向采样
-        sampled_point = point + 0.1 * direction  # 0.1 可根据 step_len 或 scale 调整
-        return sampled_point
+
+        if getattr(self.png_wrapper, "use_dir_head", False):
+            direction = self.path_point_cloud_dir[idx]
+            return point + 0.1 * direction
+        else:
+            return point
 
     def update_point_cloud(self, cmax, cmin):
         if self.pc_sample_rate == 0:
@@ -180,7 +236,11 @@ class NIRRTStarPNG3D(IRRTStar3D):
 
         # 保存点和对应方向
         self.path_point_cloud_pred = pc[path_pred.nonzero()[0]]  # (<pc_n_points, 3)
-        self.path_point_cloud_dir = path_dir[path_pred.nonzero()[0]]  # (<pc_n_points, 3)
+        if getattr(self.png_wrapper, "use_dir_head", False) and path_dir is not None:
+            self.path_point_cloud_dir = path_dir[path_pred.nonzero()[0]]
+        else:
+            # 如果没有方向预测，就用零向量或随机单位向量
+            self.path_point_cloud_dir = np.zeros_like(self.path_point_cloud_pred)
         self.visualizer.set_path_point_cloud_pred(self.path_point_cloud_pred)
 
     def visualize(self, x_center, c_best, start_goal_straightline_dist, C, figure_title=None, img_filename=None):
@@ -348,7 +408,7 @@ def get_path_planner(
     problem,
     neural_wrapper,
 ):
-    return NIRRTStarPNG3D(
+    return NIRRTStarPNGtf3D(
         problem['x_start'],
         problem['x_goal'],
         args.step_len,

@@ -1,3 +1,6 @@
+# path_planning_classes/nirrt_star_png_2d.py
+import os
+from matplotlib import pyplot as plt
 import numpy as np
 import time
 from path_planning_utils.rrt_env import Env
@@ -52,26 +55,48 @@ class NIRRTStarPNG2D(IRRTStar2D):
             cmax=np.inf,
             cmin=None,
         )
+        # fig, ax = plt.subplots()
+        # # 可视化预测路径点云
+        # if self.path_point_cloud_pred is not None:
+        #     ax.scatter(self.path_point_cloud_pred[:, 0], self.path_point_cloud_pred[:, 1],
+        #             c='r', label='Predicted high-value points')
+        # # 可视化其它点云
+        # if hasattr(self.visualizer, 'path_point_cloud_other') and self.visualizer.path_point_cloud_other is not None:
+        #     ax.scatter(self.visualizer.path_point_cloud_other[:, 0],
+        #             self.visualizer.path_point_cloud_other[:, 1],
+        #             c='gray', alpha=0.3, label='Other points')
+        # # 起点/终点
+        # ax.scatter(self.x_start[0], self.x_start[1], c='green', s=100, label='Start')
+        # ax.scatter(self.x_goal[0], self.x_goal[1], c='blue', s=100, label='Goal')
+
+        # ax.set_title("Point Cloud Prediction After init_pc()")
+        # ax.set_aspect('equal')
+        # ax.legend()
+        # plt.show()
 
     def planning(self, visualize=False):
         theta, start_goal_straightline_dist, x_center, C = self.init()
         self.init_pc()  # 初始化点云
         c_best = np.inf
         c_update = c_best
+        cost_curve = []
+        start_time = time.time()  # 记录迭代开始时间
 
         for k in range(self.iter_max):
-            start_time = time.time()  # 记录每次迭代开始时间
 
             if len(self.path_solutions) > 0:
                 c_best, x_best = self.find_best_path_solution()
 
             node_rand, c_update = self.generate_random_node(c_best, start_goal_straightline_dist, x_center, C, c_update)
+            self.visualizer.set_current_expansion(node_rand)
             node_nearest, node_nearest_index = self.nearest_neighbor(self.vertices[:self.num_vertices], node_rand)
             node_new = self.new_state(node_nearest, node_rand)
+            self.visualizer.set_current_expansion_new(node_new)
 
             if not self.utils.is_collision(node_nearest, node_new):
                 if np.linalg.norm(node_new - node_nearest) < 1e-8:
                     node_new = node_nearest
+                    self.visualizer.set_current_expansion_new(node_new)
                     node_new_index = node_nearest_index
                     curr_node_new_cost = self.cost(node_nearest_index)
                 else:
@@ -95,14 +120,15 @@ class NIRRTStarPNG2D(IRRTStar2D):
             else:
                 self.path = []
 
+            cost_curve.append(c_best)
             end_time = time.time()
             planning_time = end_time - start_time
-            if k % 100 == 0:
+            if k % 10 == 0:
                 print(f"Iteration {k} finished in {planning_time:.4f} seconds, current best path length: {c_best}")
 
                 # 可视化
-                if visualize:
-                    self.visualize(x_center, c_best, start_goal_straightline_dist, theta,iter_suffix=k)
+            if visualize:
+                self.visualize(x_center, c_best, start_goal_straightline_dist, theta, cost_curve, iter_suffix=k)
 
 
     def generate_random_node(
@@ -183,13 +209,17 @@ class NIRRTStarPNG2D(IRRTStar2D):
         self.visualizer.set_path_point_cloud_other(pc[np.nonzero(path_pred==0)[0]])
 
 
-    def visualize(self, x_center, c_best, start_goal_straightline_dist, theta, figure_title=None, img_filename=None, iter_suffix=None):
+    def visualize(self, x_center, c_best, start_goal_straightline_dist, theta, cost_curve, figure_title=None, img_filename=None, iter_suffix=None):
         if figure_title is None:
             figure_title = "nirrt* 2D"
             if iter_suffix is not None:
                 figure_title += f", iteration {iter_suffix}"
         if img_filename is None:
             img_filename = f"nirrt_2d_example_{iter_suffix}.png" if iter_suffix is not None else "nirrt_2d_example.png"
+        planner_name = self.__class__.__name__
+        img_dir = os.path.join("visualization", "planning_demo", planner_name)
+        os.makedirs(img_dir, exist_ok=True)
+        img_filename = os.path.join(img_dir,img_filename)
         self.visualizer.animation(
             self.vertices[:self.num_vertices],
             self.vertex_parents[:self.num_vertices],
@@ -201,6 +231,14 @@ class NIRRTStarPNG2D(IRRTStar2D):
             theta,
             img_filename=img_filename,
         )
+        plt.figure()
+        plt.plot(range(len(cost_curve)), cost_curve)
+        plt.xlabel("Iteration")
+        plt.ylabel("Path Cost (c_best)")
+        plt.title("Path Cost vs Iterations")
+        plt.grid(True)
+        plt.savefig(os.path.join(img_dir,"path_cost_curve.png"), dpi=300)
+        plt.close()
 
     def planning_block_gap(
         self,
