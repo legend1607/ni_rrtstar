@@ -11,7 +11,6 @@ class PNGWrapper:
     def __init__(
         self,
         num_classes=1,
-        num_keypoints=1,
         root_dir='.',
         coord_dim=2,
         device='cuda',

@@ -9,7 +9,7 @@ from pointnet_pointnet2tf.models.pointnet2_utils import pc_normalize
 class PNGWrapper:
     def __init__(
         self,
-        num_classes=2,
+        num_classes=1,
         root_dir='.',
         coord_dim=3,
         device='cuda',

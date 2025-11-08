@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from path_planning_utils.Astar_with_clearance import generate_start_goal_points, AStar
 from os.path import join, exists
 
-from path_planning_classes_3d.bit_star import BITStar  # BIT* 实现
+from path_planning_classes.bit_star import BITStar  # BIT* 实现
 
 
 def generate_env(

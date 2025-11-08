@@ -10,7 +10,7 @@ from concurrent.futures import wait
 from tqdm import tqdm
 from multiprocessing import Pool
 from environment.kuka_env import KukaEnv
-from path_planning_classes_3d.bit_star import BITStar
+from path_planning_classes.bit_star import BITStar
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ---------------- Configuration ----------------

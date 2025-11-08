@@ -18,7 +18,7 @@ args = {
     "step_len": 10,
     "iter_max": 200,
     "clearance": 0,                   # block/gap=0, random_2d=3
-    "pc_n_points": 2048,
+    "pc_n_points": 204,
     "pc_over_sample_scale": 5,
     "pc_sample_rate": 0.7,
     "pc_update_cost_ratio": 0.9,
@@ -31,7 +31,7 @@ args = {
     "iter_after_initial": 1000,       # random_2d 用
 
     # 随机数种子 (可选，保证可重复)
-    "seed": 30,
+    # "seed": 30,
 }
 
 # -------------------------------
@@ -74,7 +74,7 @@ elif args.neural_net in ["pointnet2tf"]:
         import_module("wrapper.pointnet_pointnet2." + neural_wrapper_name),
         "PNGWrapper"
     )
-    neural_wrapper = NeuralWrapper(device=args.device,use_direction=True)
+    neural_wrapper = NeuralWrapper(num_classes=1,device=args.device,use_direction=False)
 elif args.neural_net == "unet":
     neural_wrapper_name = args.neural_net + "_wrapper"
     if args.connect != "none":
@@ -112,7 +112,7 @@ env_config_list = get_env_configs()
 
 # 使用随机数种子选择环境编号
 env_config_index = np.random.randint(len(env_config_list))
-env_config_index = 1  # 或者手动指定
+# env_config_index = 10  # 或者手动指定
 print("选中的环境编号: ", env_config_index)
 
 problem = get_problem_input(env_config_list[env_config_index])

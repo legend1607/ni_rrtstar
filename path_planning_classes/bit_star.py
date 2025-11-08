@@ -21,15 +21,14 @@ from environment.timer import Timer
 import torch
 import random
 INF = float("inf")
-
-
-def set_random_seed(seed):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    random.seed(seed)
-
+from environment.random_2d_env import RandomEnv
+from result_analysis_gap import iter_max
 class BITStar:
-    def __init__(self, environment, plot_flag=False, batch_size=200, T=10000, sampling=None, timer=None):
+    def __init__(self, 
+                 environment, 
+                 iter_max, 
+                 pc_n_points, 
+                 plot_flag=False,sampling=None, timer=None):
         if timer is None:
             self.timer = Timer()
         else:
@@ -58,8 +57,9 @@ class BITStar:
         self.old_vertices = set()
 
         self.r = INF
-        self.batch_size = batch_size
-        self.T, self.T_max = 0, T
+        self.iter_max=iter_max
+        self.batch_size = pc_n_points
+        self.T = 0
         self.eta = 1.1  # tunable parameter
         self.obj_radius = 1
         self.resolution = 3
@@ -333,21 +333,31 @@ class BITStar:
             path_length += self.distance(path[i], path[i + 1])
         return path_length
 
-    def plan(self, pathLengthLimit=np.inf, refine_time_budget=10, time_budget=INF):
+    def planning(self, visual=False, refresh_interval=20):
         collision_checks = self.env.collision_check_count
-
         self.setup_planning()
         init_time = time()
 
-        while self.T < self.T_max and (time() - init_time < time_budget):
+        if visual:
+            plt.ion()  # 开启交互式绘图
+            fig, ax = plt.subplots()
+            ax.set_aspect('equal', adjustable='box')
+            ax.set_xlim(self.bounds[0][0], self.bounds[0][1])
+            ax.set_ylim(self.bounds[1][0], self.bounds[1][1])
+            ax.set_title("BIT* Path Planning")
+            start_point, goal_point = np.array(self.start), np.array(self.goal)
+            ax.plot(start_point[0], start_point[1], 'go', markersize=8, label='Start')
+            ax.plot(goal_point[0], goal_point[1], 'ro', markersize=8, label='Goal')
+            ax.legend()
+
+        for k in range(self.iter_max):
+            # 1. 如果队列为空 -> 新采样
             if not self.vertex_queue and not self.edge_queue:
                 c_best = self.g_scores[self.goal]
                 self.prune(c_best)
                 if math.isinf(c_best):
-                    # 没有找到路径 → uniform 采样
                     new_samples = [self.get_random_point() for _ in range(self.batch_size)]
                 else:
-                    # 已有路径 → 尝试 informed 采样（内部有保护，必要时回退 uniform）
                     new_samples = self.sampling(c_best, self.batch_size, self.vertices)
                 self.samples.extend(new_samples)
                 self.T += self.batch_size
@@ -355,11 +365,12 @@ class BITStar:
                 self.timer.start()
                 self.old_vertices = set(self.vertices)
                 self.vertex_queue = [(self.get_point_value(point), point) for point in self.vertices]
-                heapq.heapify(self.vertex_queue)  # change to op priority queue
+                heapq.heapify(self.vertex_queue)
                 q = len(self.vertices) + len(self.samples)
                 self.r = self.radius_init() * ((math.log(q) / q) ** (1.0 / self.dimension))
                 self.timer.finish(Timer.HEAP)
 
+            # 2. 扩展节点
             try:
                 while self.bestVertexQueueValue() <= self.bestEdgeQueueValue():
                     self.timer.start()
@@ -372,13 +383,16 @@ class BITStar:
                 else:
                     raise e
 
+            # 3. 选取最优边并扩展树
             best_edge_value, bestEdge = heapq.heappop(self.edge_queue)
-
-            # Check if this can improve the current solution
             if best_edge_value < self.g_scores[self.goal]:
                 actual_cost_of_edge = self.actual_edge_cost(bestEdge[0], bestEdge[1])
                 self.timer.start()
-                actual_f_edge = self.heuristic_cost(self.start, bestEdge[0]) + actual_cost_of_edge + self.heuristic_cost(bestEdge[1], self.goal)
+                actual_f_edge = (
+                    self.heuristic_cost(self.start, bestEdge[0]) +
+                    actual_cost_of_edge +
+                    self.heuristic_cost(bestEdge[1], self.goal)
+                )
                 if actual_f_edge < self.g_scores[self.goal]:
                     actual_g_score_of_point = self.get_g_score(bestEdge[0]) + actual_cost_of_edge
                     if actual_g_score_of_point < self.get_g_score(bestEdge[1]):
@@ -389,81 +403,100 @@ class BITStar:
                             self.vertices.append(bestEdge[1])
                             heapq.heappush(self.vertex_queue, (self.get_point_value(bestEdge[1]), bestEdge[1]))
 
-                        self.edge_queue = [item for item in self.edge_queue if item[1][1] != bestEdge[1] or \
-                                           self.get_g_score(item[1][0]) + self.heuristic_cost(item[1][0], item[1][
-                            1]) < self.get_g_score(item[1][0])]
-                        heapq.heapify(
-                            self.edge_queue)  # Rebuild the priority queue because it will be destroyed after the element is removed
-
+                        self.edge_queue = [
+                            item for item in self.edge_queue
+                            if item[1][1] != bestEdge[1] or
+                            self.get_g_score(item[1][0]) + self.heuristic_cost(item[1][0], item[1][1]) <
+                            self.get_g_score(item[1][0])
+                        ]
+                        heapq.heapify(self.edge_queue)
                 self.timer.finish(Timer.HEAP)
-
             else:
                 self.vertex_queue = []
                 self.edge_queue = []
-            if self.g_scores[self.goal] < pathLengthLimit and (time() - init_time > refine_time_budget):
-                # print(f"Refining path: {self.g_scores[self.goal]} < {pathLengthLimit} and {time() - init_time} > {refine_time_budget}")
-                break
-        # print(self.T, self.g_scores[self.goal], time() - init_time)
-        return self.samples, self.edges, self.env.collision_check_count - collision_checks, \
-               self.g_scores[self.goal], self.T, time() - init_time
 
+            # 4. 实时可视化
+            if visual and k % refresh_interval == 0:
+                ax.clear()
+                ax.set_xlim(self.bounds[0][0], self.bounds[0][1])
+                ax.set_ylim(self.bounds[1][0], self.bounds[1][1])
+                ax.set_aspect('equal', adjustable='box')
+                ax.set_title(f"BIT* Iteration {k}/{self.iter_max}")
 
-class SimpleEnv:
-    def __init__(self, binary_map, start, goal):
-        self.map = binary_map
-        self.init_state = start
-        self.goal_state = goal
-        self.bound = [(0, 0), binary_map.shape[::-1]]
-        self.config_dim = 2
-        self.collision_check_count = 0
+                # 绘制采样点
+                if self.samples:
+                    samples_arr = np.array(self.samples)
+                    ax.scatter(samples_arr[:, 0], samples_arr[:, 1], c='lightgray', s=5, label='Samples')
 
-    def _state_fp(self, state):
-        x, y = int(state[0]), int(state[1])
-        if 0 <= x < self.map.shape[1] and 0 <= y < self.map.shape[0]:
-            self.collision_check_count += 1
-            return self.map[y, x] == 1
-        return False
+                # 绘制树的边
+                for child, parent in self.edges.items():
+                    ax.plot([parent[0], child[0]], [parent[1], child[1]], c='skyblue', lw=0.5)
 
-    def _edge_fp(self, p1, p2):
-        self.collision_check_count += 1
-        num = max(int(np.linalg.norm(np.array(p2) - np.array(p1)) * 2), 2)
-        line = list(zip(
-            np.linspace(p1[0], p2[0], num=num).astype(int),
-            np.linspace(p1[1], p2[1], num=num).astype(int)
-        ))
-        return all(0 <= x < self.map.shape[1] and 0 <= y < self.map.shape[0] and self.map[y, x] == 1 for x, y in line)
-    
-def get_path_planner(args, problem, neural_wrapper):
+                # 绘制最优路径
+                path = self.get_best_path()
+                if len(path) > 1:
+                    path_arr = np.array(path)
+                    ax.plot(path_arr[:, 0], path_arr[:, 1], 'r-', lw=2, label='Best Path')
+
+                # 绘制起点与目标点
+                ax.plot(self.start[0], self.start[1], 'go', markersize=8)
+                ax.plot(self.goal[0], self.goal[1], 'ro', markersize=8)
+                ax.legend()
+                plt.pause(0.01)
+
+        if visual:
+            plt.ioff()
+            plt.show()
+
+        return (self.samples,
+                self.edges,
+                self.env.collision_check_count - collision_checks,
+                self.g_scores[self.goal],
+                self.T,
+                time() - init_time)
+
+def get_bit_planner(
+    args,
+    problem,
+    neural_wrapper=None,
+):
     """
-    创建并返回一个 BIT* 路径规划器实例
-    Args:
-        args: 参数字典，包含 batch_size、T 等规划参数
-        problem: 问题字典，必须包含 'env'、'x_start'、'x_goal' 等
-        neural_wrapper: 神经网络包装器，可为 None
-    Returns:
-        BITStar 实例
+    BIT* 路径规划器工厂函数。
+    自动在内部构造 RandomEnv，并返回初始化好的 BITStar 实例。
+
+    参数:
+        args: 命令行或配置参数对象，需包含 step_len, iter_max, clearance 等。
+        problem: dict，包含场景定义信息，如:
+            {
+                "x_start": np.array([...]),
+                "x_goal": np.array([...]),
+                "map_path": "maps/map01.png",
+                "bound": [[-1, 1], [-1, 1]],
+                "config_dim": 2
+            }
+        neural_wrapper: 可选的神经网络辅助器 (暂未使用)。
+
+    返回:
+        已初始化的 BITStar 实例。
     """
 
-    binary_mask = problem['binary_mask']
-    start = problem['x_start']
-    goal = problem['x_goal']
+    # === Step 1. 创建环境 ===
+    env = RandomEnv(
+        map_path=problem.get("map_path", None),
+        bound=problem.get("bound", [[-1, 1], [-1, 1]]),
+        config_dim=problem.get("config_dim", 2),
+        resolution=args.env_resolution if hasattr(args, "env_resolution") else 0.01,
+    )
 
-    # 创建 BIT* 环境
-    environment = SimpleEnv(binary_mask, start, goal)
+    # === Step 2. 设置起点 / 终点 ===
+    env.init_state = problem["x_start"]
+    env.goal_state = problem["x_goal"]
 
-    # 获取 batch_size 和最大迭代次数
-    batch_size = getattr(args, "batch_size", 200)
-    T_max = getattr(args, "T_max", 10000)
-
-    # 是否可视化规划过程
-    plot_flag = True if getattr(args, "visualize", False) else False
-
-    # 创建 BIT* 实例
+    # === Step 3. 初始化 BIT* ===
     planner = BITStar(
-        environment=environment,
-        plot_flag=plot_flag,
-        batch_size=batch_size,
-        T=T_max
+        env,
+        args.iter_max,
+        args.pc_n_points,
     )
 
     return planner

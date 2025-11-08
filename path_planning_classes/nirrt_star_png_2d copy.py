@@ -6,12 +6,11 @@ import time
 from path_planning_utils.rrt_env import Env
 from path_planning_classes.irrt_star_2d import IRRTStar2D
 from path_planning_classes.rrt_base_2d import RRTBase2D
-from path_planning_classes.rrt_visualizer_2d import NIRRTStarVisualizer
+from path_planning_classes.rrt_visualizer_2d import NIARRTStarVisualizer
 from datasets.point_cloud_mask_utils import get_point_cloud_mask_around_points, \
     generate_rectangle_point_cloud, ellipsoid_point_cloud_sampling
 
-
-class NIRRTStarPNG2D(IRRTStar2D):
+class NIARRTStarPNG2D(IRRTStar2D):
     def __init__(
         self,
         x_start,
@@ -37,7 +36,7 @@ class NIRRTStarPNG2D(IRRTStar2D):
             iter_max,
             Env(env_dict),
             clearance,
-            "NIRRT*-PNG 2D",
+            "NIARRT*-PNG 2D",
         )
         self.png_wrapper = png_wrapper
         self.binary_mask = binary_mask
@@ -47,7 +46,7 @@ class NIRRTStarPNG2D(IRRTStar2D):
         self.pc_neighbor_radius = self.step_len
         self.pc_update_cost_ratio = pc_update_cost_ratio
         self.path_solutions = [] # * a list of valid goal parent vertex indices
-        self.visualizer = NIRRTStarVisualizer(self.x_start, self.x_goal, self.env)
+        self.visualizer = NIARRTStarVisualizer(self.x_start, self.x_goal, self.env)
 
 
     def init_pc(self):
@@ -55,6 +54,7 @@ class NIRRTStarPNG2D(IRRTStar2D):
             cmax=np.inf,
             cmin=None,
         )
+        
         # fig, ax = plt.subplots()
         # # 可视化预测路径点云
         # if self.path_point_cloud_pred is not None:
@@ -73,6 +73,7 @@ class NIRRTStarPNG2D(IRRTStar2D):
         # ax.set_aspect('equal')
         # ax.legend()
         # plt.show()
+        
 
     def planning(self, visualize=False):
         theta, start_goal_straightline_dist, x_center, C = self.init()
@@ -398,7 +399,7 @@ def get_path_planner(
     problem,
     neural_wrapper,
 ):
-    return NIRRTStarPNG2D(
+    return NIARRTStarPNG2D(
         problem['x_start'],
         problem['x_goal'],
         args.step_len,

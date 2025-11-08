@@ -12,8 +12,8 @@ from tqdm import tqdm
 # =====================
 class Args:
     # 算法选择
-    path_planner = 'nirrt_star'   # 'rrt_star', 'irrt_star', 'nrrt_star', 'nirrt_star'
-    neural_net = 'pointnet2'      # 'none', 'pointnet2', 'unet', 'pointnet'
+    path_planner = 'niarrt_star'   # 'rrt_star', 'irrt_star', 'nrrt_star', 'nirrt_star'
+    neural_net = 'pointnet2tf'   # 'none', 'pointnet2', 'unet', 'pointnet'
     connect = 'none'              # 'none', 'bfs'
     device = 'cpu'                # 多进程下 GPU 不建议直接共享，默认 CPU
 
@@ -28,10 +28,10 @@ class Args:
     connect_max_trial_attempts = 5
 
     # 任务相关
-    problem = 'random_2d'         # 'block', 'gap', 'random_2d'
+    problem = 'random_2d_simple'         # 'block', 'gap', 'random_2d'
     path_len_threshold_percentage = 0.02
     iter_after_initial = 3000
-    num_problems = None           # None 表示全部
+    num_problems = 200         # None 表示全部
 
 args = Args()
 
@@ -48,7 +48,7 @@ else:
 # =====================
 if args.neural_net == 'none':
     path_planner_name = args.path_planner
-elif args.neural_net in ['pointnet2', 'pointnet']:
+elif args.neural_net in ['pointnet2', 'pointnet','pointnet2tf']:
     path_planner_name = args.path_planner + '_png'
 elif args.neural_net == 'unet':
     path_planner_name = args.path_planner + '_gng'
@@ -69,7 +69,7 @@ get_path_planner = getattr(
 # =====================
 if args.neural_net == 'none':
     NeuralWrapper = None
-elif args.neural_net in ['pointnet2', 'pointnet']:
+elif args.neural_net in ['pointnet2', 'pointnet','pointnet2tf']:
     neural_wrapper_name = args.neural_net + '_wrapper'
     if args.connect != 'none':
         neural_wrapper_name += '_connect_' + args.connect
@@ -111,7 +111,7 @@ else:
 # =====================
 # 获取环境配置列表
 # =====================
-if args.problem == 'random_2d':
+if args.problem == 'random_2d' or args.problem == 'random_2d_simple':
     args.clearance = 3
 
 env_config_list = get_env_configs()
@@ -144,6 +144,7 @@ def evaluate_env(env_idx_config):
     env_idx, env_config = env_idx_config
     # 跳过已计算过的环境
     if env_idx < len(env_result_config_list):
+        print(f"Env {env_idx} already evaluated, skipping...")
         return None
 
     problem = get_problem_input(env_config)
@@ -154,13 +155,14 @@ def evaluate_env(env_idx_config):
         path_len_list = path_planner.planning_block_gap(path_len_threshold)
     elif args.problem == 'gap':
         path_len_list = path_planner.planning_block_gap(problem['flank_path_len'])
-    elif args.problem == 'random_2d':
-        path_len_list = path_planner.planning_random(args.iter_after_initial)
+    elif args.problem == 'random_2d' or args.problem == 'random_2d_simple':
+        path_len_list, time_list=path_planner.planning_random(args.iter_after_initial)
     else:
         raise NotImplementedError
 
     env_result_config = copy(env_config)
     env_result_config['result'] = path_len_list
+    env_result_config['time'] = time_list
     return (env_idx, env_result_config)
 
 # =====================
@@ -171,19 +173,30 @@ if __name__ == '__main__':
     num_workers = min(cpu_count(), num_problems)
     print(f"Using {num_workers} parallel workers for evaluation...")
 
-    # 使用 Pool.map 并行
+    # 初始化结果字典并恢复旧结果
+    results_dict = {i: None for i in range(num_problems)}
+    if len(env_result_config_list) > 0:
+        print(f"[Info] Loaded {len(env_result_config_list)} previous results.")
+        for i, env_res in enumerate(env_result_config_list):
+            results_dict[i] = env_res
+
+    # 并行执行
     with Pool(num_workers) as pool:
-        results_dict = {}
         for res in tqdm(pool.imap_unordered(evaluate_env, enumerate(env_config_list[:num_problems])),
                         total=num_problems,
                         desc="Evaluating Envs"):
             if res is None:
                 continue
+
             env_idx, env_result_config = res
             results_dict[env_idx] = env_result_config
-            # 每完成一个环境就保存，防止意外中断丢数据
+
+            # 每次更新保存所有非空结果
+            sorted_results = [results_dict[i] for i in sorted(results_dict.keys()) if results_dict[i] is not None]
+
             with open(result_filepath, 'wb') as f:
-                pickle.dump(env_result_config_list, f)
+                pickle.dump(sorted_results, f)
+
             # 估算剩余时间
             elapsed = time.time() - start_time
             remaining = elapsed * (num_problems / (env_idx + 1) - 1) / 60

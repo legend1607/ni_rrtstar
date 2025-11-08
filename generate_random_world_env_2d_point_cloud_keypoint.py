@@ -13,6 +13,39 @@ from datasets.point_cloud_mask_utils import (
     generate_rectangle_point_cloud,
 )
 
+def get_path_label(pc, path, s_goal=None, sigma=None, sigma_ratio=0.03):
+    pc = np.asarray(pc)
+    path = np.asarray(path)
+    if s_goal is None:
+        s_goal = path[-1]
+
+    # 自动计算 sigma
+    if sigma is None:
+        range_vec = pc.max(axis=0) - pc.min(axis=0)
+        sigma = sigma_ratio * range_vec
+    sigma = np.asarray(sigma)
+    
+    path_label = np.zeros(len(pc), dtype=np.float32)
+    sigma_eps = np.maximum(sigma, 1e-8)
+
+    for i in range(len(path) - 1):
+        p0, p1 = path[i], path[i + 1]
+        seg_vec = p1 - p0
+        seg_len = np.linalg.norm(seg_vec)
+        if seg_len < 1e-6:
+            continue
+        vec = pc - p0
+        t = np.clip(np.sum(vec * seg_vec, axis=1) / (seg_len**2), 0, 1)
+        proj = p0 + t[:, None] * seg_vec
+
+        # 各维度加权距离
+        diff = (pc - proj) / sigma_eps
+        dist2 = np.sum(diff**2, axis=1)
+
+        label = np.exp(-0.5 * dist2)
+        path_label = np.maximum(path_label, label)
+
+    return path_label
 
 
 def get_path_and_direction_label(
@@ -95,7 +128,7 @@ def get_path_and_direction_label(
         alpha = np.exp(-dist_to_goal / goal_mix_scale)  # [0~1]
 
         mix_vec = (1 - alpha) * tangent_vec + alpha * goal_vec
-        direction_label[i] = mix_vec / (np.linalg.norm(mix_vec) + 1e-6)
+        direction_label[i] = tangent_vec#mix_vec / (np.linalg.norm(mix_vec) + 1e-6)
 
     return path_label, direction_label
 def get_keypoint_label(pc, keypoints, sigma=5.0):
@@ -190,11 +223,11 @@ def generate_npz_dataset(config_name="random_2d", planner_type="astar"):
                 around_start_mask = get_point_cloud_mask_around_points(pc, start_point, neighbor_radius=start_radius)
                 around_goal_mask = get_point_cloud_mask_around_points(pc, goal_point, neighbor_radius=goal_radius)
                 
-                path_label, direction_label = get_path_and_direction_label(pc, path, sigma=path_radius)
+                path_label = get_path_label(pc, path)
                 freespace_mask = (1 - around_start_mask) * (1 - around_goal_mask)
 
                 # 提取关键点
-                keypoints = path[1:-1]
+                keypoints = path[1:]
                 if len(keypoints) > 0:
                     keypoint_label = get_keypoint_label(pc, keypoints, sigma=10)
                 else:
@@ -216,20 +249,6 @@ def generate_npz_dataset(config_name="random_2d", planner_type="astar"):
                     plt.scatter(pc[:,0], pc[:,1], c=keypoint_label, cmap='Oranges', s=15, alpha=0.6)
 
 
-                # 绘制方向场
-                nonzero_mask = np.linalg.norm(direction_label, axis=1) > 1e-2
-                plt.quiver(
-                    pc[nonzero_mask][::1, 0],
-                    pc[nonzero_mask][::1, 1],
-                    direction_label[nonzero_mask][::1, 0],
-                    direction_label[nonzero_mask][::1, 1],
-                    color='blue',
-                    scale=25,
-                    width=0.002,
-                    alpha=0.8,
-                    label='Direction field'
-                )
-
                 plt.title(f"Env {env_idx} Sample {sample_idx}\nDirection field around path & keypoints")
                 plt.legend(loc='upper right', fontsize=8)
                 plt.axis('equal')
@@ -245,7 +264,6 @@ def generate_npz_dataset(config_name="random_2d", planner_type="astar"):
                 raw_dataset["free"].append(freespace_mask.astype(np.float32))
                 raw_dataset["path"].append(path_label.astype(np.float32))
                 raw_dataset["keypoint"].append(keypoint_label.astype(np.float32))
-                raw_dataset["direction"].append(direction_label.astype(np.float32))
 
             # 临时保存
             if (env_idx + 1) % 25 == 0:

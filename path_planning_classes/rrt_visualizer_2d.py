@@ -233,6 +233,9 @@ class NIARRTStarVisualizer:
         # 新增：记录当前扩展点与方向
         self.current_node = None
         self.pred_direction = None
+        self.combined_cloud_pred = None
+        self.keypoint_cloud_pred = None
+        self.valid_cloud_combined = None
 
     # ------------------------ 动画主函数 ------------------------
     def animation(self, vertices, vertex_parents, path,
@@ -240,10 +243,10 @@ class NIARRTStarVisualizer:
                   img_filename=None,
                   img_folder='visualization/planning_demo'):
         self.plot_grid(figure_title)
-        self.plot_predicted_clouds()
-        self.plot_current_expansion_rand()  # ✅ 新增当前扩展点
-        self.plot_current_expansion_new()  # ✅ 新增当前扩展点
         self.plot_visited(vertices, vertex_parents)
+        self.plot_current_expansion_rand()  # ✅ 新增当前扩展点
+        self.plot_predicted_clouds()
+        self.plot_current_expansion_new()  # ✅ 新增当前扩展点
         if c_best != np.inf:
             self.draw_ellipse(x_center, c_best, dist, theta)
         self.plot_path(path)
@@ -266,6 +269,10 @@ class NIARRTStarVisualizer:
         self.path_point_cloud_pred = path_point_cloud_pred
     def set_keypoint_cloud_pred(self, keypoint_cloud_pred):
         self.keypoint_cloud_pred = keypoint_cloud_pred
+    def set_combined_cloud_pred(self, combined_cloud_pred):
+        self.combined_cloud_pred = combined_cloud_pred
+    def set_valid_cloud_combined(self, valid_cloud_combined):
+        self.valid_cloud_combined = valid_cloud_combined
 
     def set_current_expansion(self, node):
         """在规划循环中更新当前扩展点"""
@@ -342,14 +349,25 @@ class NIARRTStarVisualizer:
             plt.scatter(self.path_point_cloud_other[:, 0],
                         self.path_point_cloud_other[:, 1],
                         s=6, c='lightgray', label='Free Space', alpha=0.4, zorder=1)
-        if self.path_point_cloud_pred is not None:
-            plt.scatter(self.path_point_cloud_pred[:, 0],
-                        self.path_point_cloud_pred[:, 1],
-                        s=10, c='orange', label='Predicted High-Value Points', alpha=0.8, zorder=3)
-        if self.keypoint_cloud_pred is not None:
-            plt.scatter(self.keypoint_cloud_pred[:, 0],
-                        self.keypoint_cloud_pred[:, 1],
-                        s=10, c='blue', label='Predicted Keypoints', alpha=0.8, zorder=3)
+        if self.valid_cloud_combined is not None:
+            plt.scatter(self.valid_cloud_combined[:, 0],
+                        self.valid_cloud_combined[:, 1],
+                        s=10, c='brown', label='Predicted Keypoints&pathpoints', alpha=0.8, zorder=3)
+            self.valid_cloud_combined=None
+        elif self.combined_cloud_pred is not None:
+            plt.scatter(self.combined_cloud_pred[:, 0],
+                        self.combined_cloud_pred[:, 1],
+                        s=10, c='purple', label='Predicted Keypoints&pathpoints', alpha=0.8, zorder=3)
+            self.combined_cloud_pred=None
+        else:
+            if self.path_point_cloud_pred is not None:
+                plt.scatter(self.path_point_cloud_pred[:, 0],
+                            self.path_point_cloud_pred[:, 1],
+                            s=10, c='orange', label='Predicted High-Value Points', alpha=0.8, zorder=3)
+            if self.keypoint_cloud_pred is not None:
+                plt.scatter(self.keypoint_cloud_pred[:, 0],
+                            self.keypoint_cloud_pred[:, 1],
+                            s=10, c='blue', label='Predicted Keypoints', alpha=0.8, zorder=3)
 
     def draw_ellipse(self, x_center, c_best, dist, theta):
         if c_best == np.inf:

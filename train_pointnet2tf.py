@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument('--lr_decay', type=float, default=0.7)
     parser.add_argument('--random_seed', type=int, default=None)
     parser.add_argument('--use_direction', action='store_true', help='Enable direction head and loss')
-    parser.add_argument('--freeze_direction_epochs', type=int, default=50,
+    parser.add_argument('--freeze_direction_epochs', type=int, default=0,
                         help='Number of initial epochs to freeze direction head (default 0)')
     parser.add_argument('--save_by', type=str, default='combined', choices=['combined', 'path_iou', 'keypoint_f1'],
                         help='Which metric to use for saving best model')
@@ -179,7 +179,7 @@ def main(args):
             pg['lr'] = lr
         log(f"LR: {lr:.6f}")
         # ---------- 在到达解冻点时一次性解冻 ----------
-        if epoch == args.freeze_direction_epochs:
+        if args.use_direction and hasattr(classifier, 'direction_head') and epoch == args.freeze_direction_epochs:
             log("Unfreezing direction head and resetting optimizer")
             for p in classifier.direction_head.parameters():
                 p.requires_grad = True
@@ -188,6 +188,7 @@ def main(args):
                 filter(lambda p: p.requires_grad, classifier.parameters()),
                 lr=lr, weight_decay=args.decay_rate
             )
+
 
         # ---------- 日志：打印当前冻结状态 ----------
         if hasattr(classifier, 'direction_head'):
@@ -220,17 +221,17 @@ def main(args):
                 pc_pos_np = pc_pos
 
             # --- 数据增强（返回 rot_mats 用于同步方向） ---
-            if args.env.startswith('kuka') and env is not None:
-                pc_xyz_np = point_utils.augment_kuka_joint_space(pc_pos_np, env=env)
-                rot_mats = None
-            else:
-                pc_xyz_np, rot_mats = point_utils.rotate_point_cloud_z(pc_pos_np, return_rotmat=True)
+#             if args.env.startswith('kuka') and env is not None:
+#                 pc_xyz_np = point_utils.augment_kuka_joint_space(pc_pos_np, env=env)
+#                 rot_mats = None
+#             else:
+#                 pc_xyz_np, rot_mats = point_utils.rotate_point_cloud_z(pc_pos_np, return_rotmat=True)
 
-                # 同步旋转 direction_labels （only if use_direction）
-                if args.use_direction and direction_labels is not None:
-                    dir_np = direction_labels.cpu().numpy()  # [B, N, 2]
-                    rotated_dirs = np.matmul(dir_np, rot_mats.transpose(0, 2, 1))  # [B, N, 2]
-                    direction_labels = torch.from_numpy(rotated_dirs).float()
+#                 # 同步旋转 direction_labels （only if use_direction）
+#                 if args.use_direction and direction_labels is not None:
+#                     dir_np = direction_labels.cpu().numpy()  # [B, N, 2]
+#                     rotated_dirs = np.matmul(dir_np, rot_mats.transpose(0, 2, 1))  # [B, N, 2]
+#                     direction_labels = torch.from_numpy(rotated_dirs).float()
 
             # --- 转回 tensor，移动到 device（non_blocking 以配合 pin_memory） ---
             pc_xyz = torch.from_numpy(pc_xyz_np).float().to(device, non_blocking=True)   # [B, N, C]
@@ -249,18 +250,21 @@ def main(args):
 
             optimizer.zero_grad()
             total_loss.backward()
-            # === Freeze-check: ensure direction head grads are zero during freeze ===
-            # if epoch < args.freeze_direction_epochs and hasattr(classifier, 'direction_head'):
-            #     for name, param in classifier.direction_head.named_parameters():
-            #         if param.grad is not None:
-            #             # 使用范数检查是否接近 0（避免浮点误差问题）
-            #             max_abs = param.grad.detach().abs().max().item()
-            #             assert max_abs < 1e-9, f"[Freeze check fail] {name} has non-zero grad ({max_abs}) during freeze!"
-            # if hasattr(classifier, 'direction_head'):
-            #     first_param = next(classifier.direction_head.parameters())
-            #     log(f"[DEBUG] Direction head param mean={first_param.data.mean().item():.6e}")
-            #     grads = [p.grad.abs().mean().item() if p.grad is not None else 0.0 for p in classifier.direction_head.parameters()]
-            #     log(f"[DEBUG] Direction head grad mean={np.mean(grads):.6e}")
+
+            # ---- 打印每个 head 的梯度 ----
+            def grad_stats(name, params):
+                grads = [p.grad.detach() for p in params if p.grad is not None]
+                if len(grads) == 0:
+                    print(f"[{name}] No gradients!")
+                    return
+                grad_norms = [g.norm().item() for g in grads]
+                grad_means = [g.abs().mean().item() for g in grads]
+                print(f"[{name}] grad_norm: {np.mean(grad_norms):.6f}, grad_abs_mean: {np.mean(grad_means):.6f}")
+
+            grad_stats("Path Head", classifier.path_head.parameters())
+            grad_stats("Keypoint Head", classifier.keypoint_head.parameters())
+            if hasattr(classifier, 'direction_head') and direction_pred is not None:
+                grad_stats("Direction Head", classifier.direction_head.parameters())
 
             optimizer.step()
 

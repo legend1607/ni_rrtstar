@@ -1,6 +1,7 @@
 
 
 import math
+import time
 import numpy as np
 
 from path_planning_classes.rrt_base_2d import RRTBase2D
@@ -194,78 +195,124 @@ class RRTStar2D(RRTBase2D):
             if current_path_len < path_len_threshold:
                 break
         return path_len_list
+        
+    def planning_random(self, iter_after_initial):
+        import numpy as np
+        import time
 
-    def planning_random(
-        self,
-        iter_after_initial,
-    ):
         path_len_list = []
-        for k in range(self.iter_max):
-            node_rand = self.generate_random_node()
-            node_nearest, node_nearest_index = self.nearest_neighbor(self.vertices[:self.num_vertices], node_rand)
-            node_new = self.new_state(node_nearest, node_rand)
-            if not self.utils.is_collision(node_nearest, node_new):
-                if np.linalg.norm(node_new-node_nearest)<1e-8:
-                    # * do not create a new node if it is actually the same point
-                    node_new = node_nearest
-                    node_new_index = node_nearest_index
-                    curr_node_new_cost = self.cost(node_nearest_index)
+        time_list = []
+
+        def ensure_capacity(index_needed):
+            """动态扩容以避免越界"""
+            if index_needed < len(self.vertices):
+                return
+            old_size = len(self.vertices)
+            new_size = max(old_size * 2, index_needed + 1)
+            print(f"[Info] Expanding vertices from {old_size} to {new_size}")
+
+            # 扩容 vertices
+            dim = self.vertices.shape[1]
+            new_vertices = np.zeros((new_size, dim), dtype=self.vertices.dtype)
+            new_vertices[:old_size] = self.vertices
+            self.vertices = new_vertices
+
+            # 扩容 vertex_parents
+            new_parents = np.full((new_size,), -1, dtype=self.vertex_parents.dtype)
+            new_parents[:old_size] = self.vertex_parents
+            self.vertex_parents = new_parents
+
+        try:
+            # =====================
+            # 第一阶段：寻找初始路径
+            # =====================
+            for k in range(self.iter_max):
+                t0 = time.time()
+                node_rand = self.generate_random_node()
+                node_nearest, node_nearest_index = self.nearest_neighbor(self.vertices[:self.num_vertices], node_rand)
+                node_new = self.new_state(node_nearest, node_rand)
+
+                if not self.utils.is_collision(node_nearest, node_new):
+                    if np.linalg.norm(node_new - node_nearest) < 1e-8:
+                        # * 新节点和旧节点相同，不添加
+                        node_new_index = node_nearest_index
+                        curr_node_new_cost = self.cost(node_nearest_index)
+                    else:
+                        node_new_index = self.num_vertices
+                        ensure_capacity(node_new_index)
+                        self.vertices[node_new_index] = node_new
+                        self.vertex_parents[node_new_index] = node_nearest_index
+                        self.num_vertices += 1
+                        curr_node_new_cost = self.cost(node_nearest_index) + self.Line(node_nearest, node_new)
+
+                    neighbor_indices = self.find_near_neighbors(node_new, node_new_index)
+                    if len(neighbor_indices) > 0:
+                        self.choose_parent(node_new, neighbor_indices, node_new_index, curr_node_new_cost)
+                        self.rewire(node_new, neighbor_indices, node_new_index)
+
+                goal_parent_index = self.search_goal_parent()
+                if goal_parent_index is None:
+                    current_path = []
                 else:
-                    node_new_index = self.num_vertices
-                    self.vertices[node_new_index] = node_new
-                    self.vertex_parents[node_new_index] = node_nearest_index
-                    self.num_vertices += 1
-                    curr_node_new_cost = self.cost(node_nearest_index)+self.Line(node_nearest, node_new)
-                neighbor_indices = self.find_near_neighbors(node_new, node_new_index)
-                if len(neighbor_indices)>0:
-                    self.choose_parent(node_new, neighbor_indices, node_new_index, curr_node_new_cost)
-                    self.rewire(node_new, neighbor_indices, node_new_index)
-            goal_parent_index = self.search_goal_parent()
-            if goal_parent_index is None:
-                current_path = []
-            else:
+                    current_path = self.extract_path(goal_parent_index)
+                current_path_len = self.get_path_len(current_path)
+                path_len_list.append(current_path_len)
+                time_list.append(time.time() - t0)
+
+                if (k + 1) % 1000 == 0:
+                    if current_path_len == np.inf:
+                        print(f"{k+1}/{self.iter_max} - current: inf")
+                if current_path_len < np.inf:
+                    print(f"{k+1}/{self.iter_max} - current: {current_path_len:.2f}")
+                    break
+
+            # 没找到初始路径
+            if len(path_len_list) == 0 or path_len_list[-1] == np.inf:
+                print("[Warning] Failed to find initial path solution.")
+                return path_len_list, time_list
+
+            initial_path_len = path_len_list[-1]
+
+            # =====================
+            # 第二阶段：路径优化
+            # =====================
+            for k in range(iter_after_initial):
+                t0 = time.time()
+                node_rand = self.generate_random_node()
+                node_nearest, node_nearest_index = self.nearest_neighbor(self.vertices[:self.num_vertices], node_rand)
+                node_new = self.new_state(node_nearest, node_rand)
+
+                if not self.utils.is_collision(node_nearest, node_new):
+                    if np.linalg.norm(node_new - node_nearest) < 1e-8:
+                        node_new_index = node_nearest_index
+                        curr_node_new_cost = self.cost(node_nearest_index)
+                    else:
+                        node_new_index = self.num_vertices
+                        ensure_capacity(node_new_index)
+                        self.vertices[node_new_index] = node_new
+                        self.vertex_parents[node_new_index] = node_nearest_index
+                        self.num_vertices += 1
+                        curr_node_new_cost = self.cost(node_nearest_index) + self.Line(node_nearest, node_new)
+
+                    neighbor_indices = self.find_near_neighbors(node_new, node_new_index)
+                    if len(neighbor_indices) > 0:
+                        self.choose_parent(node_new, neighbor_indices, node_new_index, curr_node_new_cost)
+                        self.rewire(node_new, neighbor_indices, node_new_index)
+
+                goal_parent_index = self.search_goal_parent()
                 current_path = self.extract_path(goal_parent_index)
-            current_path_len = self.get_path_len(current_path)
-            path_len_list.append(current_path_len)
-            if (k+1) % 1000 == 0:
-                if current_path_len == np.inf:
-                    print("{0}/{1} - current: inf".format(k+1, self.iter_max))
-            if current_path_len < np.inf:
-                print("{0}/{1} - current: {2:.2f}".format(k+1, self.iter_max, current_path_len))
-                break
-        if path_len_list[-1]==np.inf:
-            # * fail to find initial path solution
-            return path_len_list
-        initial_path_len = path_len_list[-1]
-        # * iteration after finding initial solution
-        for k in range(iter_after_initial):
-            node_rand = self.generate_random_node()
-            node_nearest, node_nearest_index = self.nearest_neighbor(self.vertices[:self.num_vertices], node_rand)
-            node_new = self.new_state(node_nearest, node_rand)
-            if not self.utils.is_collision(node_nearest, node_new):
-                if np.linalg.norm(node_new-node_nearest)<1e-8:
-                    # * do not create a new node if it is actually the same point
-                    node_new = node_nearest
-                    node_new_index = node_nearest_index
-                    curr_node_new_cost = self.cost(node_nearest_index)
-                else:
-                    node_new_index = self.num_vertices
-                    self.vertices[node_new_index] = node_new
-                    self.vertex_parents[node_new_index] = node_nearest_index
-                    self.num_vertices += 1
-                    curr_node_new_cost = self.cost(node_nearest_index)+self.Line(node_nearest, node_new)
-                neighbor_indices = self.find_near_neighbors(node_new, node_new_index)
-                if len(neighbor_indices)>0:
-                    self.choose_parent(node_new, neighbor_indices, node_new_index, curr_node_new_cost)
-                    self.rewire(node_new, neighbor_indices, node_new_index)
-            goal_parent_index = self.search_goal_parent()
-            current_path = self.extract_path(goal_parent_index) # * must be valid after initial path solution is found
-            current_path_len = self.get_path_len(current_path)
-            path_len_list.append(current_path_len)
-            if (k+1) % 1000 == 0:
-                print("{0}/{1} - current: {2:.2f}, initial: {3:.2f}".format(\
-                    k+1, iter_after_initial, current_path_len, initial_path_len))
-        return path_len_list
+                current_path_len = self.get_path_len(current_path)
+                path_len_list.append(current_path_len)
+                time_list.append(time.time() - t0)
+
+                if (k + 1) % 1000 == 0:
+                    print(f"{k+1}/{iter_after_initial} - current: {current_path_len:.2f}, initial: {initial_path_len:.2f}")
+
+            return path_len_list, time_list
+
+        except Exception as e:
+            print(f"[Error] planning_random() exception: {e}")
+            return path_len_list, time_list
 
 def get_path_planner(
     args,

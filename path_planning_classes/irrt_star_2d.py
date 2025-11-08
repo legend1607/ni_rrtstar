@@ -1,5 +1,6 @@
 import math
 import random
+import time
 
 import numpy as np
 
@@ -31,6 +32,27 @@ class IRRTStar2D(RRTStar2D):
         )
         self.path_solutions = [] # * a list of valid goal parent vertex indices
         self.visualizer = IRRTStarVisualizer(self.x_start, self.x_goal, self.env)
+    
+    def _ensure_capacity(self, required_index):
+        """
+        如果节点数量超过预分配大小，则自动扩容 self.vertices 和 self.vertex_parents
+        """
+        old_capacity = self.vertices.shape[0]
+        if required_index < old_capacity:
+            return  # 空间够用，不扩容
+
+        new_capacity = max(old_capacity * 2, required_index + 1)
+        print(f"[IRRT*] 扩容 vertices: {old_capacity} -> {new_capacity}")
+
+        # 扩容 vertices
+        new_vertices = np.empty((new_capacity,), dtype=object)
+        new_vertices[:old_capacity] = self.vertices
+        self.vertices = new_vertices
+
+        # 扩容 vertex_parents
+        new_parents = np.full((new_capacity,), -1, dtype=int)
+        new_parents[:old_capacity] = self.vertex_parents
+        self.vertex_parents = new_parents
 
     def init(self):
         cMin, theta = self.get_distance_and_angle(self.x_start, self.x_goal)
@@ -61,6 +83,7 @@ class IRRTStar2D(RRTStar2D):
                     curr_node_new_cost = self.cost(node_nearest_index)
                 else:
                     node_new_index = self.num_vertices
+                    self._ensure_capacity(node_new_index)
                     self.vertices[node_new_index] = node_new
                     self.vertex_parents[node_new_index] = node_nearest_index
                     self.num_vertices += 1
@@ -206,6 +229,7 @@ class IRRTStar2D(RRTStar2D):
                     curr_node_new_cost = self.cost(node_nearest_index)
                 else:
                     node_new_index = self.num_vertices
+                    self._ensure_capacity(node_new_index)
                     self.vertices[node_new_index] = node_new
                     self.vertex_parents[node_new_index] = node_nearest_index
                     self.num_vertices += 1
@@ -232,10 +256,12 @@ class IRRTStar2D(RRTStar2D):
         iter_after_initial,
     ):
         path_len_list = []
+        time_list = []  # ✅ 新增：记录规划时间
         theta, start_goal_straightline_dist, x_center, C = self.init()
         c_best = np.inf
         better_than_inf = False
         for k in range(self.iter_max):
+            t0 = time.time()  # ✅ 开始计时
             if len(self.path_solutions)>0:
                 c_best, x_best = self.find_best_path_solution()
             path_len_list.append(c_best)
@@ -244,6 +270,7 @@ class IRRTStar2D(RRTStar2D):
                     print("{0}/{1} - current: inf".format(k, self.iter_max)) #* not k+1, because we are not getting c_best after iteration is done
             if c_best < np.inf:
                 better_than_inf = True
+                time_list.append(time.time() - t0)  # ✅ 保存时间
                 print("{0}/{1} - current: {2:.2f}".format(k, self.iter_max, c_best))
                 break
             node_rand = self.generate_random_node(c_best, start_goal_straightline_dist, x_center, C)
@@ -257,6 +284,7 @@ class IRRTStar2D(RRTStar2D):
                     curr_node_new_cost = self.cost(node_nearest_index)
                 else:
                     node_new_index = self.num_vertices
+                    self._ensure_capacity(node_new_index)
                     self.vertices[node_new_index] = node_new
                     self.vertex_parents[node_new_index] = node_nearest_index
                     self.num_vertices += 1
@@ -267,7 +295,9 @@ class IRRTStar2D(RRTStar2D):
                     self.rewire(node_new, neighbor_indices, node_new_index)
                 if self.InGoalRegion(node_new):
                     self.path_solutions.append(node_new_index)
+            time_list.append(time.time() - t0)  # ✅ 保存本次迭代时间
         path_len_list = path_len_list[1:] # * the first one is the initialized c_best before iteration
+        time_list = time_list[1:]  # ✅ 时间列表也对应裁剪
         if better_than_inf:
             initial_path_len = path_len_list[-1]
         else:
@@ -275,6 +305,7 @@ class IRRTStar2D(RRTStar2D):
             if len(self.path_solutions)>0:
                 c_best, x_best = self.find_best_path_solution()
             path_len_list.append(c_best)
+            time_list.append(0.)  # ✅ 此时间可以忽略
             initial_path_len = path_len_list[-1]
             if initial_path_len == np.inf:
                 # * fail to find initial path solution
@@ -282,6 +313,7 @@ class IRRTStar2D(RRTStar2D):
         path_len_list = path_len_list[:-1] # * for loop below will add initial_path_len to path_len_list
         # * iteration after finding initial solution
         for k in range(iter_after_initial):
+            t0 = time.time()
             c_best, x_best = self.find_best_path_solution() # * there must be path solutions
             path_len_list.append(c_best)
             if k % 1000 == 0:
@@ -298,6 +330,7 @@ class IRRTStar2D(RRTStar2D):
                     curr_node_new_cost = self.cost(node_nearest_index)
                 else:
                     node_new_index = self.num_vertices
+                    self._ensure_capacity(node_new_index)
                     self.vertices[node_new_index] = node_new
                     self.vertex_parents[node_new_index] = node_nearest_index
                     self.num_vertices += 1
@@ -308,12 +341,14 @@ class IRRTStar2D(RRTStar2D):
                     self.rewire(node_new, neighbor_indices, node_new_index)
                 if self.InGoalRegion(node_new):
                     self.path_solutions.append(node_new_index)
+            time_list.append(time.time() - t0)  # ✅ 保存时间
         # * path cost for the last iteration
         c_best, x_best = self.find_best_path_solution() # * there must be path solutions
         path_len_list.append(c_best)
+        time_list.append(0.)  # ✅ 最后一次时间附 0，无影响
         print("{0}/{1} - current: {2:.2f}, initial: {3:.2f}".format(\
             iter_after_initial, iter_after_initial, c_best, initial_path_len))
-        return path_len_list
+        return path_len_list, time_list
 
 def get_path_planner(
     args,
